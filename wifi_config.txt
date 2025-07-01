@@ -1,0 +1,26 @@
+WiFi配置说明
+==============
+
+在上传程序之前，请修改 src/main.cpp 文件中的WiFi配置：
+
+1. 找到以下行：
+   const char* ssid = "YOUR_WIFI_SSID";        // 请修改为您的WiFi名称
+   const char* password = "YOUR_WIFI_PASSWORD"; // 请修改为您的WiFi密码
+
+2. 将 "YOUR_WIFI_SSID" 替换为您的WiFi网络名称
+   将 "YOUR_WIFI_PASSWORD" 替换为您的WiFi密码
+
+示例：
+   const char* ssid = "MyHome_WiFi";
+   const char* password = "mypassword123";
+
+注意事项：
+- WiFi名称和密码区分大小写
+- 确保ESP32在WiFi信号覆盖范围内
+- 支持2.4GHz WiFi网络（不支持5GHz）
+- 如果WiFi名称包含中文，可能需要使用UTF-8编码
+
+连接成功后：
+- 串口监视器会显示分配的IP地址
+- 在浏览器中输入该IP地址即可访问控制界面
+- 例如：http://192.168.1.100
