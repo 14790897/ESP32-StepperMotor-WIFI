@@ -1,0 +1,144 @@
+ESP32步进电机控制器测试命令
+===============================
+
+## 基本控制命令（串口或Web界面）
+
+### 串口命令
+f - 正转一圈
+b - 反转一圈
+h - 正转半圈
+r - 反转半圈
+q - 正转90度
+e - 反转90度
+s - 停止电机
+
+### Web界面基本控制
+http://[ESP32_IP]/control?cmd=f    # 正转一圈
+http://[ESP32_IP]/control?cmd=b    # 反转一圈
+http://[ESP32_IP]/control?cmd=h    # 正转半圈
+http://[ESP32_IP]/control?cmd=r    # 反转半圈
+http://[ESP32_IP]/control?cmd=q    # 正转90度
+http://[ESP32_IP]/control?cmd=e    # 反转90度
+http://[ESP32_IP]/control?cmd=s    # 停止电机
+
+## 高级控制命令（仅Web界面）
+
+### 速度控制
+http://[ESP32_IP]/advanced?speed=25     # 设置速度为25%
+http://[ESP32_IP]/advanced?speed=50     # 设置速度为50%
+http://[ESP32_IP]/advanced?speed=75     # 设置速度为75%
+http://[ESP32_IP]/advanced?speed=100    # 设置速度为100%
+
+### 定时旋转
+# 正转10秒
+http://[ESP32_IP]/advanced?action=timed&direction=cw&duration=10
+
+# 反转5秒
+http://[ESP32_IP]/advanced?action=timed&direction=ccw&duration=5
+
+# 正转30秒
+http://[ESP32_IP]/advanced?action=timed&direction=cw&duration=30
+
+### 循环旋转
+# 正转循环3次，每次5秒
+http://[ESP32_IP]/advanced?action=loop&direction=cw&duration=5&loops=3
+
+# 反转循环5次，每次3秒
+http://[ESP32_IP]/advanced?action=loop&direction=ccw&duration=3&loops=5
+
+# 无限正转循环，每次2秒
+http://[ESP32_IP]/advanced?action=loop&direction=cw&duration=2&loops=0
+
+### 停止所有运动
+http://[ESP32_IP]/advanced?action=stop
+
+### 状态查询
+http://[ESP32_IP]/status
+
+## 测试序列建议
+
+### 基本功能测试
+1. 连接WiFi，获取IP地址
+2. 访问Web界面，确认界面正常
+3. 测试基本控制按钮
+4. 检查状态显示是否正确
+
+### 速度控制测试
+1. 设置速度为10%，执行正转一圈，观察速度
+2. 设置速度为50%，执行正转一圈，观察速度
+3. 设置速度为100%，执行正转一圈，观察速度
+4. 确认速度变化明显
+
+### 定时旋转测试
+1. 设置定时旋转5秒，观察是否准时停止
+2. 在旋转过程中点击停止，确认立即停止
+3. 测试不同时间长度（1秒、10秒、30秒）
+
+### 循环功能测试
+1. 设置循环3次，每次2秒，观察循环执行
+2. 设置无限循环，运行一段时间后手动停止
+3. 在循环过程中修改速度，观察是否生效
+
+### 综合测试
+1. 设置速度为75%
+2. 启动循环旋转5次，每次3秒
+3. 在第2次循环时修改速度为25%
+4. 观察后续循环是否使用新速度
+5. 在第4次循环时停止
+
+## 预期结果
+
+### 正常运行指标
+- Web界面响应时间 < 1秒
+- 状态更新延迟 < 2秒
+- 定时精度误差 < 0.5秒
+- 速度变化明显可感知
+
+### 异常处理验证
+- 网络断开后重连正常
+- 参数超出范围时自动限制
+- 停止命令立即生效
+- 系统重启后恢复默认设置
+
+## 故障排除
+
+### 常见问题
+1. 无法访问Web界面
+   - 检查WiFi连接
+   - 确认IP地址正确
+   - 检查防火墙设置
+
+2. 电机不转动
+   - 检查硬件连接
+   - 确认电源供应
+   - 查看串口输出
+
+3. 速度控制无效
+   - 重新设置速度
+   - 检查网络连接
+   - 重启ESP32
+
+4. 循环功能异常
+   - 点击停止重置状态
+   - 检查参数设置
+   - 查看串口调试信息
+
+### 调试方法
+1. 使用串口监视器查看调试信息
+2. 使用浏览器开发者工具检查网络请求
+3. 观察电机和驱动板LED指示灯
+4. 测量电源电压是否稳定
+
+## 性能基准
+
+### 响应时间
+- 基本控制：< 100ms
+- 高级控制：< 200ms
+- 状态查询：< 50ms
+- 页面加载：< 2s
+
+### 资源使用
+- RAM使用：< 12%
+- Flash使用：< 65%
+- CPU使用：< 30%
+- 网络带宽：< 1KB/s

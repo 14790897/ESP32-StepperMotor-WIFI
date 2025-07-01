@@ -14,7 +14,10 @@
 
 // 步进电机参数
 const int stepsPerRevolution = 2048;  // 28BYJ-48步进电机每转一圈的步数
-const int stepDelay = 2;              // 步进间隔时间(毫秒)
+int stepDelay = 2;                    // 步进间隔时间(毫秒) - 可调节速度
+int currentSpeed = 50;                // 当前速度百分比 (1-100)
+int rotationDuration = 0;             // 旋转持续时间(秒) 0=不限制
+String durationUnit = "秒";           // 时间单位显示
 
 // 步进序列 - 8步序列(半步模式，更平滑)
 /**
@@ -37,20 +40,26 @@ int stepSequence[8][4] = {
 
 // 全局变量
 int currentStep = 0;
-bool isRunning = false;  // 电机运行状态
-String lastCommand = ""; // 最后执行的命令
+bool isRunning = false;              // 电机运行状态
+String lastCommand = "";             // 最后执行的命令
+unsigned long rotationStartTime = 0; // 旋转开始时间
+bool stopRequested = false;          // 停止请求标志
+bool currentDirection = true;        // 当前旋转方向 true=正转, false=反转
 
 // 创建Web服务器对象
 AsyncWebServer server(80);
 
 // 函数声明
 void stepMotor(int steps, bool clockwise = true);
+void stepMotorTimed(bool clockwise, int duration);
 void setStep(int step);
 void stopMotor();
+void setSpeed(int speedPercent);
 void setupWiFi();
 void setupWebServer();
 String getWebPage();
 void executeCommand(String command);
+void handleAdvancedControl(AsyncWebServerRequest *request);
 
 void setup() {
   Serial.begin(115200);
@@ -88,27 +97,95 @@ void loop() {
     executeCommand(String(command));
   }
 
-  // 处理其他任务
-  delay(10);
-}
+  // 非阻塞步进控制
+  static unsigned long lastStepTime = 0;
 
-// 步进电机控制函数
-void stepMotor(int steps, bool clockwise) {
-  isRunning = true;
-  for (int i = 0; i < steps; i++) {
-    if (clockwise) {
-      currentStep = (currentStep + 1) % 8;
-    } else {
-      currentStep = (currentStep - 1 + 8) % 8;
+  if (isRunning && !stopRequested)
+  {
+    // 检查是否到了下一步的时间
+    if (millis() - lastStepTime >= stepDelay)
+    {
+      // 执行一步
+      if (currentDirection)
+      {
+        currentStep = (currentStep + 1) % 8;
+      }
+      else
+      {
+        currentStep = (currentStep - 1 + 8) % 8;
+      }
+
+      setStep(currentStep);
+      lastStepTime = millis();
     }
-
-    setStep(currentStep);
-    delay(stepDelay);
   }
 
-  // 运行完成后停止电机以节省功耗
-  stopMotor();
-  isRunning = false;
+  // 检查定时旋转
+  if (isRunning && rotationDuration > 0)
+  {
+    if (millis() - rotationStartTime >= rotationDuration * 1000)
+    {
+      stopMotor();
+      Serial.println("定时旋转完成");
+    }
+  }
+
+  // 检查停止请求
+  if (stopRequested)
+  {
+    stopMotor();
+    stopRequested = false;
+  }
+
+  // 处理其他任务 - 减少延时以提高响应性
+  delay(1);
+}
+
+// 步进电机控制函数 - 改为基于时间的非阻塞版本
+void stepMotor(int steps, bool clockwise)
+{
+  // 计算需要的时间（步数 * 延时）
+  int duration = (steps * stepDelay) / 1000; // 转换为秒
+  if (duration < 1)
+    duration = 1; // 至少1秒
+
+  currentDirection = clockwise;
+  stepMotorTimed(clockwise, duration);
+
+  Serial.println("执行 " + String(steps) + " 步 " + (clockwise ? "正转" : "反转"));
+}
+
+// 定时旋转函数 - 非阻塞版本
+void stepMotorTimed(bool clockwise, int duration)
+{
+  isRunning = true;
+  stopRequested = false;
+  rotationStartTime = millis();
+  rotationDuration = duration;
+  currentDirection = clockwise;
+
+  // 确定时间单位显示
+  if (duration >= 60)
+  {
+    int minutes = duration / 60;
+    int seconds = duration % 60;
+    if (seconds == 0)
+    {
+      durationUnit = String(minutes) + "分钟";
+    }
+    else
+    {
+      durationUnit = String(minutes) + "分" + String(seconds) + "秒";
+    }
+  }
+  else
+  {
+    durationUnit = String(duration) + "秒";
+  }
+
+  Serial.println("开始定时旋转 " + durationUnit + " " + (clockwise ? "正转" : "反转"));
+
+  // 不在这里执行循环，而是在loop()中处理
 }
 
 // 设置步进状态
@@ -126,6 +203,23 @@ void stopMotor() {
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, LOW);
   isRunning = false;
+  stopRequested = false;
+  rotationDuration = 0;
+}
+
+// 设置速度函数
+void setSpeed(int speedPercent)
+{
+  if (speedPercent < 1)
+    speedPercent = 1;
+  if (speedPercent > 100)
+    speedPercent = 100;
+
+  currentSpeed = speedPercent;
+  // 速度越高，延时越短 (1-20毫秒)
+  stepDelay = map(speedPercent, 1, 100, 20, 1);
+
+  Serial.println("速度设置为: " + String(speedPercent) + "% (延时: " + String(stepDelay) + "ms)");
 }
 
 // 执行命令函数
@@ -172,10 +266,11 @@ void executeCommand(String command) {
   else if (command == "s") {
     Serial.println("停止电机");
     lastCommand = "停止电机";
-    stopMotor();
+    stopRequested = true;
   }
   else {
     Serial.println("未知命令: " + command);
+    Serial.println("可用命令: f, b, h, r, q, e, s");
   }
 }
 
@@ -223,10 +318,14 @@ void setupWebServer() {
   server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request){
     String status = "{";
     status += "\"running\":" + String(isRunning ? "true" : "false") + ",";
-    status += "\"lastCommand\":\"" + lastCommand + "\"";
+    status += "\"lastCommand\":\"" + lastCommand + "\",";
+    status += "\"currentSpeed\":" + String(currentSpeed);
     status += "}";
     request->send(200, "application/json", status);
   });
+
+  // 高级控制路由
+  server.on("/advanced", HTTP_GET, handleAdvancedControl);
   // 主页路由
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(200, "text/html", getWebPage()); });
@@ -412,6 +511,108 @@ String getWebPage() {
             box-shadow: 0 6px 20px rgba(255,193,7,0.4);
         }
 
+        .advanced-controls {
+            margin-top: 30px;
+            padding: 30px;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+
+        .advanced-controls h2 {
+            color: #333;
+            margin-bottom: 25px;
+            text-align: center;
+            font-size: 1.8em;
+        }
+
+        .speed-control, .timed-control {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .speed-control label, .timed-control label {
+            font-weight: bold;
+            color: #333;
+        }
+
+        .speed-control input[type="range"] {
+            width: 100%;
+            height: 8px;
+            border-radius: 5px;
+            background: #ddd;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .speed-control input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #007bff;
+            cursor: pointer;
+        }
+
+        .timed-control input {
+            padding: 10px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.3s ease;
+        }
+
+        .timed-control input:focus {
+            border-color: #007bff;
+            outline: none;
+        }
+
+        .time-input-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .time-input-group input {
+            width: 60px;
+            text-align: center;
+        }
+
+        .quick-time-buttons {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin: 15px 0;
+        }
+
+        .btn-time {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: all 0.3s ease;
+        }
+
+        .btn-time:hover {
+            background: #5a6268;
+            transform: translateY(-1px);
+        }
+
+        .direction-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 15px;
+        }
+
         .footer {
             margin-top: 30px;
             padding-top: 20px;
@@ -461,8 +662,13 @@ String getWebPage() {
                     <div class='status-value' id='lastCommand'>无</div>
                 </div>
                 <div class='status-item'>
+                    <div class='status-label'>当前速度</div>
+                    <div class='status-value' id='currentSpeed'>50%</div>
+                </div>
+                <div class='status-item'>
                     <div class='status-label'>IP地址</div>
-                    <div class='status-value'>)" + WiFi.localIP().toString() + R"(</div>
+                    <div class='status-value'>)" +
+                WiFi.localIP().toString() + R"(</div>
                 </div>
             </div>
         </div>
@@ -492,6 +698,43 @@ String getWebPage() {
             </div>
         </div>
 
+        <div class='advanced-controls'>
+            <h2>⚙️ 高级控制</h2>
+
+            <div class='control-group'>
+                <h3>🚀 速度控制</h3>
+                <div class='speed-control'>
+                    <label for='speedSlider'>速度: <span id='speedValue'>50</span>%</label>
+                    <input type='range' id='speedSlider' min='1' max='100' value='50' oninput='updateSpeed(this.value)'>
+                </div>
+            </div>
+
+            <div class='control-group'>
+                <h3>⏰ 定时旋转</h3>
+                <div class='timed-control'>
+                    <div class='time-input-group'>
+                        <label for='minutes'>分钟:</label>
+                        <input type='number' id='minutes' min='0' max='60' value='0'>
+                        <label for='seconds'>秒:</label>
+                        <input type='number' id='seconds' min='0' max='59' value='5'>
+                    </div>
+                    <div class='quick-time-buttons'>
+                        <button class='btn-time' onclick='setQuickTime(0, 30)'>30秒</button>
+                        <button class='btn-time' onclick='setQuickTime(1, 0)'>1分钟</button>
+                        <button class='btn-time' onclick='setQuickTime(2, 0)'>2分钟</button>
+                        <button class='btn-time' onclick='setQuickTime(5, 0)'>5分钟</button>
+                        <button class='btn-time' onclick='setQuickTime(10, 0)'>10分钟</button>
+                    </div>
+                    <div class='direction-buttons'>
+                        <button class='btn btn-success' onclick='startTimed(true)'>正转</button>
+                        <button class='btn btn-warning' onclick='startTimed(false)'>反转</button>
+                    </div>
+                </div>
+            </div>
+
+
+        </div>
+
         <div class='footer'>
             <p>💡 提示：点击按钮控制步进电机，状态会实时更新</p>
             <p>🔧 硬件：ESP32-C3 + ULN2003 + 28BYJ-48</p>
@@ -518,6 +761,7 @@ String getWebPage() {
                 .then(data => {
                     const statusElement = document.getElementById('motorStatus');
                     const commandElement = document.getElementById('lastCommand');
+                    const speedElement = document.getElementById('currentSpeed');
 
                     if (data.running) {
                         statusElement.textContent = '运行中';
@@ -528,12 +772,70 @@ String getWebPage() {
                     }
 
                     commandElement.textContent = data.lastCommand || '无';
+                    speedElement.textContent = data.currentSpeed + '%';
                 })
                 .catch(error => {
                     console.error('获取状态失败:', error);
                     document.getElementById('motorStatus').textContent = '连接错误';
                 });
         }
+
+        // 高级控制函数
+        function updateSpeed(value) {
+            document.getElementById('speedValue').textContent = value;
+            fetch('/advanced?speed=' + value)
+                .then(response => response.text())
+                .then(data => {
+                    console.log('速度设置成功:', value + '%');
+                    updateStatus();
+                })
+                .catch(error => {
+                    console.error('设置速度失败:', error);
+                });
+        }
+
+        function setQuickTime(minutes, seconds) {
+            document.getElementById('minutes').value = minutes;
+            document.getElementById('seconds').value = seconds;
+        }
+
+        function startTimed(clockwise) {
+            const minutes = parseInt(document.getElementById('minutes').value) || 0;
+            const seconds = parseInt(document.getElementById('seconds').value) || 0;
+            const direction = clockwise ? 'cw' : 'ccw';
+
+            // 验证时间输入
+            if (minutes === 0 && seconds === 0) {
+                alert('请设置旋转时间！');
+                return;
+            }
+
+            if (minutes > 60 || seconds > 59) {
+                alert('时间设置超出范围！分钟不能超过60，秒不能超过59');
+                return;
+            }
+
+            // 构建请求URL
+            let url = '/advanced?action=timed&direction=' + direction + '&minutes=' + minutes;
+            if (seconds > 0) {
+                url += '&seconds=' + seconds;
+            }
+
+            fetch(url)
+                .then(response => response.text())
+                .then(data => {
+                    const timeStr = minutes > 0 ?
+                        (minutes + '分' + (seconds > 0 ? seconds + '秒' : '钟')) :
+                        seconds + '秒';
+                    console.log('定时旋转开始:', timeStr, clockwise ? '正转' : '反转');
+                    updateStatus();
+                })
+                .catch(error => {
+                    console.error('启动定时旋转失败:', error);
+                });
+        }
+
+
 
         // 页面加载时更新状态
         updateStatus();
@@ -546,4 +848,64 @@ String getWebPage() {
 )";
 
   return html;
+}
+
+// 高级控制处理函数
+void handleAdvancedControl(AsyncWebServerRequest *request)
+{
+  String response = "OK";
+  Serial.println("收到高级控制请求");
+
+  if (request->hasParam("speed"))
+  {
+    int speed = request->getParam("speed")->value().toInt();
+    setSpeed(speed);
+    lastCommand = "设置速度 " + String(speed) + "%";
+  }
+
+  if (request->hasParam("action"))
+  {
+    String action = request->getParam("action")->value();
+    bool clockwise = true;
+    int duration = 5; // 默认5秒
+    int loops = 1;    // 默认1次
+
+    if (request->hasParam("direction"))
+    {
+      clockwise = request->getParam("direction")->value() == "cw";
+    }
+
+    if (request->hasParam("duration"))
+    {
+      duration = request->getParam("duration")->value().toInt();
+    }
+
+    // 处理分钟参数
+    if (request->hasParam("minutes"))
+    {
+      int minutes = request->getParam("minutes")->value().toInt();
+      duration = minutes * 60; // 转换为秒
+      if (request->hasParam("seconds"))
+      {
+        int seconds = request->getParam("seconds")->value().toInt();
+        duration += seconds; // 添加额外的秒数
+      }
+    }
+
+    if (action == "timed")
+    {
+      // 立即启动定时旋转（非阻塞）
+      stepMotorTimed(clockwise, duration);
+      lastCommand = "定时旋转 " + durationUnit + " " + (clockwise ? "正转" : "反转");
+      response = "定时旋转已启动";
+    }
+    else if (action == "stop")
+    {
+      stopRequested = true;
+      lastCommand = "停止所有运动";
+      response = "停止命令已发送";
+    }
+  }
+
+  request->send(200, "text/plain", response);
 }
